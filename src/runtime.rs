@@ -1,3 +1,4 @@
+use futures::task::WakerRef;
 use futures::{
     future::{BoxFuture, FutureExt},
     task::{ArcWake, waker_ref},
@@ -8,6 +9,7 @@ use std::{
     sync::{Arc, Mutex},
     task::Context,
 };
+use std::task::Poll;
 
 /// A future that can reschedule itself to be polled by an `Executor`.
 pub struct Task {
@@ -18,6 +20,7 @@ pub struct Task {
     /// enough to know that `future` is only mutated from one thread,
     /// so we need to use the `Mutex` to prove thread-safety. A production
     /// executor would not need this, and could use `UnsafeCell` instead.
+    /// The future is optional to protect against a misimplemented task which attempts to wake a future that has already returned Ready
     future: Mutex<Option<BoxFuture<'static, ()>>>,
 
     /// Handle to place the task itself back onto the task queue when ready
@@ -29,11 +32,7 @@ impl ArcWake for Task {
     fn wake_by_ref(arc_self: &Arc<Self>) {
         // Implement `wake` by sending this task back onto the task channel
         // so that it will be polled again by the executor.
-        let cloned = arc_self.clone();
-        arc_self
-            .task_sender
-            .try_send(cloned)
-            .expect("too many tasks queued");
+        todo!();
     }
 }
 
@@ -55,14 +54,13 @@ impl Spawner {
     pub(crate) fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) {
         // box the future - we want to be able to store different types of futures
         // in the same data structure, and boxing it gives it a consistent size
-        let future = future.boxed();
-        let task = Arc::new(Task {
-            future: Mutex::new(Some(future)),
-            task_sender: self.task_sender.clone(),
-        });
-        self.task_sender
-            .try_send(task)
-            .expect("too many tasks queued");
+        let future: BoxFuture<()> = todo!();
+
+        // Create a new task to run the future. The task will need the boxed future and a clone
+        // of task_sender in order to reschedule itself
+        let task: Arc<Task> = todo!();
+
+        // then send the task into the channel
     }
 }
 
@@ -72,19 +70,23 @@ impl Executor {
             // Take the future, and if it has not yet completed (is still Some),
             // poll it in an attempt to complete it.
             let mut future_slot = task.future.lock().unwrap();
-            if let Some(mut future) = future_slot.take() {
+            // use pattern matching (if let) to determine whether the future is none or some
+            todo!(); {
                 // Create a `WakerRef` from the task itself
-                let waker = waker_ref(&task);
+                let waker: WakerRef = todo!();
 
-                let context = &mut Context::from_waker(&waker);
+                let context: &mut Context = todo!();
                 // `BoxFuture<T>` is a type alias for
                 // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
                 // We can get a `Pin<&mut dyn Future + Send + 'static>`
-                // from it by calling the `Pin::as_mut` method.
-                if future.as_mut().poll(context).is_pending() {
+                // from it by calling the `Pin::as_mut` method
+                // then we can call poll on the resulting dyn Future
+                let res: Poll<()> = todo!();
+
+                if res.is_pending() {
                     // We're not done processing the future, so put it
                     // back in its task to be run again in the future.
-                    *future_slot = Some(future);
+                    *future_slot = todo!();
                 }
             }
         }
