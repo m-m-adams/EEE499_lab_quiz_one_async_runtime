@@ -83,9 +83,23 @@ mod tests {
 
     #[test]
     fn test_timer_future() {
+        // this will pass as long as the duration in the future is correctly waited for
         let start = Instant::now();
         let timer = TimerFuture::new(Duration::from_secs(2));
         futures::executor::block_on(timer);
+        let run_time = start.elapsed();
+        assert!(run_time >= Duration::from_secs(2));
+        assert!(run_time - Duration::from_secs(2) < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_timers_parallel() {
+        let start = Instant::now();
+        let timers: Vec<_> = (0..10)
+            .map(|_| TimerFuture::new(Duration::from_secs(2)))
+            .collect();
+        // this is just going to poll them all in a loop - will pass as long as the futures don't block
+        futures::executor::block_on(futures::future::join_all(timers));
         let run_time = start.elapsed();
         assert!(run_time >= Duration::from_secs(2));
         assert!(run_time - Duration::from_secs(2) < Duration::from_millis(100));
