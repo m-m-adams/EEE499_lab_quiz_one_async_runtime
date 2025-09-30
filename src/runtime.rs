@@ -24,19 +24,6 @@ pub struct Task {
     task_sender: SyncSender<Arc<Task>>,
 }
 
-/// The arcwake trait will allow us to turn an Arc<Task> into a Waker
-impl ArcWake for Task {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        // Implement `wake` by sending this task back onto the task channel
-        // so that it will be polled again by the executor.
-        let cloned = arc_self.clone();
-        arc_self
-            .task_sender
-            .try_send(cloned)
-            .expect("too many tasks queued");
-    }
-}
-
 /// Task executor that receives tasks off of a channel and runs them. The receiver end of the
 /// channel is stored here, and a clone of the sender end is stored in each `Task`.
 pub struct Runtime {
@@ -51,6 +38,21 @@ pub enum RuntimeError {
     #[error("Task channel full")]
     TaskChannelFull(#[from] std::sync::mpsc::TrySendError<Arc<Task>>),
 }
+
+/// The arcwake trait will allow us to turn an Arc<Task> into a Waker
+impl ArcWake for Task {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        // Implement `wake` by sending this task back onto the task channel
+        // so that it will be polled again by the executor.
+        let cloned = arc_self.clone();
+        arc_self
+            .task_sender
+            .try_send(cloned)
+            .expect("too many tasks queued");
+    }
+}
+
+
 
 impl Runtime {
 
