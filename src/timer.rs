@@ -37,16 +37,13 @@ impl SleepFuture {
             shared_waker: Some(cx.waker().clone()),
             completed: false,
         };
-        let context = Arc::new(Mutex::new(context));
-        let cloned_ctx = context.clone();
+        let context: Arc<Mutex<SleepContext>> = Arc::new(Mutex::new(context));
+        let clone_for_thread = context.clone();
         let _ = thread::spawn(move || {
-            thread::sleep(duration);
-            let mut c = cloned_ctx.lock().unwrap();
-            c.completed = true;
-            // wake the task
-            if let Some(waker) = c.shared_waker.take() {
-                waker.wake();
-            }
+            todo!(
+                "pause the thread until the duration is completed. \
+            When the thread resumes call wake if the wake function exists"
+            );
         });
         self.state = SleepState::Running(context);
     }
@@ -57,19 +54,13 @@ impl Future for SleepFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
             SleepState::Created(duration) => {
-                self.spawn_timer_thread(cx, duration);
-                Poll::Pending
+                todo!("spawn the timer thread");
             }
             SleepState::Running(ref ctx) => {
-                {
-                    let mut ctx = ctx.lock().unwrap();
-                    if !ctx.completed {
-                        ctx.shared_waker = Some(cx.waker().clone());
-                        return Poll::Pending;
-                    }
-                }
-                self.state = SleepState::Done;
-                Poll::Ready(())
+                todo!(
+                    "check if the thread is done. If it is, set the state to Done and return Poll::Ready(()). \
+                if not update the shared wake function and return Poll::Pending."
+                );
             }
             SleepState::Done => Poll::Ready(()),
         }
@@ -79,9 +70,7 @@ impl Future for SleepFuture {
 impl Drop for SleepFuture {
     fn drop(&mut self) {
         if let SleepState::Running(context) = &self.state {
-            let mut ctx = context.lock().unwrap();
-            ctx.shared_waker = None;
-            ctx.completed = true;
+            todo!("remove the context from the timer thread to free its resources");
         }
     }
 }

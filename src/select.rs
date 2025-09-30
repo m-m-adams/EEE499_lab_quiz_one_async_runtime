@@ -17,13 +17,7 @@ impl<A: SimpleFuture, B: SimpleFuture> Future for Select<A, B> {
     type Output = Either<A::Output, B::Output>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(out) = Pin::new(&mut self.fut_one).poll(cx) {
-            Poll::Ready(Either::A(out))
-        } else if let Poll::Ready(out) = Pin::new(&mut self.fut_two).poll(cx) {
-            Poll::Ready(Either::B(out))
-        } else {
-            Poll::Pending
-        }
+        todo!("poll both futures and return the first one that completes");
     }
 }
 

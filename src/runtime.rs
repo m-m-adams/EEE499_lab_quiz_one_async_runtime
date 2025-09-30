@@ -1,7 +1,9 @@
+use futures::task::WakerRef;
 use futures::{
     future::{BoxFuture, FutureExt},
     task::{ArcWake, waker_ref},
 };
+use std::task::Poll;
 use std::{
     future::Future,
     sync::mpsc::{Receiver, SyncSender, sync_channel},
@@ -42,13 +44,10 @@ pub enum RuntimeError {
 /// The arcwake trait will allow us to turn an Arc<Task> into a Waker
 impl ArcWake for Task {
     fn wake_by_ref(arc_self: &Arc<Self>) {
-        // Implement `wake` by sending this task back onto the task channel
-        // so that it will be polled again by the executor.
-        let cloned = arc_self.clone();
-        arc_self
-            .task_sender
-            .try_send(cloned)
-            .expect("too many tasks queued");
+        todo!(
+            "Implement `wake` by sending this task back onto the task channel\
+        so that it will be polled again by the executor."
+        );
     }
 }
 
@@ -69,39 +68,35 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         match self.task_sender.as_ref() {
             Some(sender) => {
-                // box the future - we want to be able to store different types of futures
-                // in the same data structure, and boxing it gives it a consistent size
-                let future = future.boxed();
-                let task = Arc::new(Task {
-                    future: Mutex::new(Some(future)),
-                    task_sender: sender.clone(),
-                });
-                sender.try_send(task)?;
-                Ok(())
+                let future: BoxFuture<()> = todo!("Box the future so it has a known size");
+                let task: Arc<Task> = todo!("Create a new task with the future and sender");
+                todo!("Send the task to the task channel and return the result");
             }
             None => Err(RuntimeError::TaskChannelClosed),
         }
     }
 
+    // consumes the executor and runs until the channel is closed (all tasks are complete)
     pub fn run(mut self) {
-        self.task_sender = None;
+        todo!("drop the task sender so that run will finish when all tasks are done");
         while let Ok(task) = self.ready_queue.recv() {
             // Take the future, and if it has not yet completed (is still Some),
             // poll it in an attempt to complete it.
             let mut future_slot = task.future.lock().unwrap();
-            if let Some(mut future) = future_slot.take() {
+            todo!("Use pattern matching to determine if the future is still Some");
+            {
                 // Create a `WakerRef` from the task itself
-                let waker = waker_ref(&task);
+                let waker: WakerRef = todo!("Create a waker from the task");
 
-                let context = &mut Context::from_waker(&waker);
+                let context: &mut Context = todo!("Create a context with the waker");
                 // `BoxFuture<T>` is a type alias for
                 // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
                 // We can get a `Pin<&mut dyn Future + Send + 'static>`
-                // from it by calling the `Pin::as_mut` method.
-                if future.as_mut().poll(context).is_pending() {
-                    // We're not done processing the future, so put it
-                    // back in its task to be run again in the future.
-                    *future_slot = Some(future);
+                // from it by calling the `Pin::as_mut` method
+                // then we can call poll on the resulting dyn Future
+                let res: Poll<()> = todo!("Poll the future");
+                if res.is_pending() {
+                    *future_slot = todo!("Put the future back in the task slot to be polled again");
                 }
             }
         }
