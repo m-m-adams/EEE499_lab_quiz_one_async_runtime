@@ -6,7 +6,6 @@ use std::{
     thread,
     time::Duration,
 };
-use std::sync::MutexGuard;
 
 pub struct TimerFuture {
     shared_state: Arc<Mutex<SharedState>>,
@@ -28,19 +27,25 @@ struct SharedState {
 impl Future for TimerFuture {
     type Output = ();
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Lock the shared state, check if the timer has completed, and set the waker if it hasn't
-        let mut shared_state: MutexGuard<SharedState> = todo!();
+        // Look at the shared state to see if the timer has already completed.
+        let mut shared_state = self.shared_state.lock().unwrap();
         if shared_state.completed {
-            // return the correct value for a completed future that is ready to continue
-            todo!()
+            Poll::Ready(())
         } else {
             // Set waker so that the thread can wake up the current task
             // when the timer has completed, ensuring that the future is polled
             // again and sees that `completed = true`.
             //
-            // the waker can be extracted from the current task context with cx.waker().clone()
-            // must be done on every poll as the waker can change if the task was moved to a new executor
-            todo!()
+            // It's tempting to do this once rather than repeatedly cloning
+            // the waker each time. However, the `TimerFuture` can move between
+            // tasks on the executor, which could cause a stale waker pointing
+            // to the wrong task, preventing `TimerFuture` from waking up
+            // correctly.
+            //
+            // N.B. it's possible to check for this using the `Waker::will_wake`
+            // function, but we omit that here to keep things simple.
+            shared_state.waker = Some(cx.waker().clone());
+            Poll::Pending
         }
     }
 }
@@ -49,18 +54,22 @@ impl TimerFuture {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     pub fn new(duration: Duration) -> Self {
-        let shared_state: Arc<Mutex<SharedState>> = todo!();
+        let shared_state = Arc::new(Mutex::new(SharedState {
+            completed: false,
+            waker: None,
+        }));
 
         // Spawn the new thread
         let thread_shared_state = shared_state.clone();
         thread::spawn(move || {
-            // sleep the thread until the duration is completed, then call wake
-            todo!();
-            // when the thread resumes
-            // Signal that the timer has completed and
-            // call the wake function if one exists.
-            let mut shared_state: MutexGuard<SharedState> = todo!();
-            todo!();
+            thread::sleep(duration);
+            let mut shared_state = thread_shared_state.lock().unwrap();
+            // Signal that the timer has completed and wake up the last
+            // task on which the future was polled, if one exists.
+            shared_state.completed = true;
+            if let Some(waker) = shared_state.waker.take() {
+                waker.wake()
+            }
         });
 
         TimerFuture { shared_state }
