@@ -105,6 +105,9 @@ impl Runtime {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+    use std::task::Poll;
+    use std::time::{Duration, Instant};
     use super::*;
     use crate::timer::SleepFuture;
     async fn increment_count(count: Arc<Mutex<u32>>) {
@@ -112,19 +115,22 @@ mod tests {
         let mut num = count.lock().unwrap();
         *num += 1;
     }
+    async fn increment_count_twice(count: Arc<Mutex<u32>>) {
+        increment_count(count.clone()).await;
+        increment_count(count).await;
+    }
     #[test]
     fn test_run_all_tasks() {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();
-        // Spawn a task to print before and after waiting on a timer.
+        // Spawn tasks to wait and then increment the count
         for _ in 0..10 {
             let count_clone = count.clone();
             executor.spawn(increment_count(count_clone)).expect("failed to spawn");
         }
-        // Drop the spawner to drop its reference to the task sending channel
-        // otherwise the runtime will be stuck waiting for new tasks
-        // Run the executor until the task queue is empty.
+
         executor.run();
+        // check that the count was incremented by 10 and the executor finished
         assert_eq!(*count.lock().unwrap(), 10);
     }
     #[test]
@@ -140,5 +146,49 @@ mod tests {
         let target = std::time::Duration::new(1, 10_000_000);
         println!("Elapsed: {:?}, Target: {:?}", rt, target);
         assert!(rt < target);
+    }
+
+    #[test]
+    fn test_series() {
+        let count = Arc::new(Mutex::new(0));
+        let executor = Runtime::new();
+        executor.spawn(increment_count_twice(count.clone())).expect("failed to spawn");
+
+        executor.run();
+        // check that the count was incremented by 10 and the executor finished
+        assert_eq!(*count.lock().unwrap(), 2);
+    }
+
+    struct double_sleep {
+        sleep_one: SleepFuture,
+        sleep_two: SleepFuture,
+    }
+    impl Future for double_sleep {
+        type Output = ();
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if let Poll::Ready(()) = Pin::new(&mut self.sleep_one).poll(cx) {
+                Poll::Ready(())
+            }
+            else if let Poll::Ready(()) = Pin::new(&mut self.sleep_two).poll(cx) {
+                Poll::Ready(())
+            }
+            else {
+                Poll::Pending
+            }
+
+        }
+    }
+
+    #[test]
+    fn test_select() {
+        let sleepy_sleep = double_sleep {sleep_one: SleepFuture::new(Duration::from_secs(2)), sleep_two: SleepFuture::new(Duration::from_secs(1))};
+        let start = Instant::now();
+        let executor = Runtime::new();
+
+        executor.spawn(sleepy_sleep).expect("failed to spawn");
+        executor.run();
+        let run_time = start.elapsed();
+        assert!(run_time >= Duration::from_secs(1));
+        assert!(run_time <= Duration::from_secs(2));
     }
 }

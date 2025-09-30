@@ -73,10 +73,21 @@ impl Future for SleepFuture {
     }
 }
 
+impl Drop for SleepFuture {
+    fn drop(&mut self) {
+        if let SleepState::Running(handle, context) = &self.state {
+            let mut ctx = context.lock().unwrap();
+            ctx.shared_waker = None;
+        }
+    }
+}
+
 
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
     use super::SleepFuture;
     use std::time::{Duration, Instant};
 
@@ -103,4 +114,5 @@ mod tests {
         assert!(run_time >= Duration::from_secs(2));
         assert!(run_time - Duration::from_secs(2) < Duration::from_millis(100));
     }
+
 }
