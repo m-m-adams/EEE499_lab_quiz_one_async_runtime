@@ -6,86 +6,85 @@ use std::{
     thread,
     time::Duration,
 };
+use std::thread::JoinHandle;
 
-pub struct TimerFuture {
-    shared_state: Arc<Mutex<SharedState>>,
+pub struct SleepFuture {
+    state: SleepState,
 }
-
-/// Shared state between the future and the waiting thread. You will be able to pass a clone of
-/// the Arc<Mutex<SharedState>> to another thread, allowing that thread to wake the future on completion
-struct SharedState {
-    /// Whether or not the sleep time has elapsed
-    completed: bool,
-
-    /// The waker for the task that `TimerFuture` is running on.
-    /// The thread can use this after setting `completed = true` to tell
-    /// `TimerFuture`'s task to wake up, see that `completed = true`, and
-    /// move forward.
-    waker: Option<Waker>,
-}
-
-impl Future for TimerFuture {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Look at the shared state to see if the timer has already completed.
-        let mut shared_state = self.shared_state.lock().unwrap();
-        if shared_state.completed {
-            Poll::Ready(())
-        } else {
-            // Set waker so that the thread can wake up the current task
-            // when the timer has completed, ensuring that the future is polled
-            // again and sees that `completed = true`.
-            //
-            // It's tempting to do this once rather than repeatedly cloning
-            // the waker each time. However, the `TimerFuture` can move between
-            // tasks on the executor, which could cause a stale waker pointing
-            // to the wrong task, preventing `TimerFuture` from waking up
-            // correctly.
-            //
-            // N.B. it's possible to check for this using the `Waker::will_wake`
-            // function, but we omit that here to keep things simple.
-            shared_state.waker = Some(cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-impl TimerFuture {
-    /// Create a new `TimerFuture` which will complete after the provided
-    /// timeout.
+impl SleepFuture {
+    /// Create a new `SleepFuture` which will complete after a timeout
     pub fn new(duration: Duration) -> Self {
-        let shared_state = Arc::new(Mutex::new(SharedState {
-            completed: false,
-            waker: None,
-        }));
+        SleepFuture { state: SleepState::Created(duration) }
+    }
 
-        // Spawn the new thread
-        let thread_shared_state = shared_state.clone();
-        thread::spawn(move || {
+    fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+        let context = SleepContext { shared_waker: Some(cx.waker().clone()) };
+        let context = Arc::new(Mutex::new(context));
+        let cloned_ctx = context.clone();
+        let h = thread::spawn(move || {
             thread::sleep(duration);
-            let mut shared_state = thread_shared_state.lock().unwrap();
-            // Signal that the timer has completed and wake up the last
-            // task on which the future was polled, if one exists.
-            shared_state.completed = true;
-            if let Some(waker) = shared_state.waker.take() {
-                waker.wake()
+            let mut c = cloned_ctx.lock().unwrap();
+            // Spawn the new thread
+            if let Some(waker) = c.shared_waker.take() {
+                waker.wake();
             }
         });
-
-        TimerFuture { shared_state }
+        self.state = SleepState::Running(h, context);
     }
 }
+
+enum SleepState{
+    /// the future is created but not yet polled
+    Created(Duration),
+    /// the future is currently waiting for the timer to complete
+    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
+    /// the future has completed
+    Done,
+}
+
+struct SleepContext {
+    shared_waker: Option<Waker>,
+}
+
+impl Future for SleepFuture {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.state {
+            SleepState::Created(duration) => {
+                self.spawn_timer_thread(cx, duration);
+                Poll::Pending
+            }
+            SleepState::Running(ref handle,ref ctx) => {
+                if handle.is_finished() {
+                    self.state = SleepState::Done;
+                    Poll::Ready(())
+                }
+                else {
+                    let mut ctx = ctx.lock().unwrap();
+                        ctx.shared_waker = Some(cx.waker().clone());
+                        Poll::Pending
+                }
+            }
+            SleepState::Done => {
+                Poll::Ready(())
+            }
+        }
+
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
-    use super::TimerFuture;
+    use super::SleepFuture;
     use std::time::{Duration, Instant};
 
     #[test]
     fn test_timer_future() {
         // this will pass as long as the duration in the future is correctly waited for
         let start = Instant::now();
-        let timer = TimerFuture::new(Duration::from_secs(2));
+        let timer = SleepFuture::new(Duration::from_secs(2));
         futures::executor::block_on(timer);
         let run_time = start.elapsed();
         assert!(run_time >= Duration::from_secs(2));
@@ -96,7 +95,7 @@ mod tests {
     fn test_timers_parallel() {
         let start = Instant::now();
         let timers: Vec<_> = (0..10)
-            .map(|_| TimerFuture::new(Duration::from_secs(2)))
+            .map(|_| SleepFuture::new(Duration::from_secs(2)))
             .collect();
         // this is just going to poll them all in a loop - will pass as long as the futures don't block
         futures::executor::block_on(futures::future::join_all(timers));

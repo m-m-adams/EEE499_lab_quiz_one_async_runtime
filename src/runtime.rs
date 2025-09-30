@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
     task::Context,
 };
-
+use thiserror::Error;
 /// A future that can reschedule itself to be polled by an `Executor`.
 pub struct Task {
     /// In-progress future that should be pushed to completion.
@@ -39,35 +39,47 @@ impl ArcWake for Task {
 
 /// Task executor that receives tasks off of a channel and runs them. The receiver end of the
 /// channel is stored here, and a clone of the sender end is stored in each `Task`.
-pub struct Executor {
+pub struct Runtime {
     ready_queue: Receiver<Arc<Task>>,
+    task_sender: Option<SyncSender<Arc<Task>>>,
 }
 
-/// `Spawner` spawns new futures onto the task channel.
-#[derive(Clone)]
-pub struct Spawner {
-    task_sender: SyncSender<Arc<Task>>,
+#[derive(Error, Debug)]
+pub enum RuntimeError {
+    #[error("Task channel closed")]
+    TaskChannelClosed,
+    #[error("Task channel full")]
+    TaskChannelFull(#[from] std::sync::mpsc::TrySendError<Arc<Task>>),
 }
 
-impl Spawner {
+impl Runtime {
+
+    pub(crate) fn new() -> Self {
+        const MAX_QUEUED_TASKS: usize = 10_000;
+        let (task_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
+        Runtime { ready_queue,  task_sender: Some(task_sender) }
+    }
     /// Spawn a new future onto the task channel. The future should be any type which implements
     /// `Future` with an output type of `()` that can be sent between threads and have a static lifetime
-    pub(crate) fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) {
-        // box the future - we want to be able to store different types of futures
-        // in the same data structure, and boxing it gives it a consistent size
-        let future = future.boxed();
-        let task = Arc::new(Task {
-            future: Mutex::new(Some(future)),
-            task_sender: self.task_sender.clone(),
-        });
-        self.task_sender
-            .try_send(task)
-            .expect("too many tasks queued");
+    pub(crate) fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) -> Result<(), RuntimeError> {
+        match self.task_sender.as_ref() {
+            Some(sender) => {
+                // box the future - we want to be able to store different types of futures
+                // in the same data structure, and boxing it gives it a consistent size
+                let future = future.boxed();
+                let task = Arc::new(Task {
+                    future: Mutex::new(Some(future)),
+                    task_sender: sender.clone(),
+                });
+                sender.try_send(task)?;
+                Ok(())
+            }
+            None => Err(RuntimeError::TaskChannelClosed)
+        }
     }
-}
 
-impl Executor {
-    pub(crate) fn run(&self) {
+    pub(crate) fn run(mut self) {
+        self.task_sender = None;
         while let Ok(task) = self.ready_queue.recv() {
             // Take the future, and if it has not yet completed (is still Some),
             // poll it in an attempt to complete it.
@@ -91,46 +103,36 @@ impl Executor {
     }
 }
 
-pub fn new_executor_and_spawner() -> (Executor, Spawner) {
-    // Maximum number of tasks to allow queueing in the channel at once.
-    // This is just to make `sync_channel` happy, and wouldn't be present in
-    // a real executor.
-    const MAX_QUEUED_TASKS: usize = 10_000;
-    let (task_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
-    (Executor { ready_queue }, Spawner { task_sender })
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::timer::TimerFuture;
+    use crate::timer::SleepFuture;
     async fn increment_count(count: Arc<Mutex<u32>>) {
-        TimerFuture::new(std::time::Duration::new(0, 100)).await;
+        SleepFuture::new(std::time::Duration::new(0, 100)).await;
         let mut num = count.lock().unwrap();
         *num += 1;
     }
     #[test]
     fn test_run_all_tasks() {
         let count = Arc::new(Mutex::new(0));
-        let (executor, spawner) = new_executor_and_spawner();
+        let executor = Runtime::new();
         // Spawn a task to print before and after waiting on a timer.
         for _ in 0..10 {
             let count_clone = count.clone();
-            spawner.spawn(increment_count(count_clone));
+            executor.spawn(increment_count(count_clone)).expect("failed to spawn");
         }
         // Drop the spawner to drop its reference to the task sending channel
         // otherwise the runtime will be stuck waiting for new tasks
-        drop(spawner);
         // Run the executor until the task queue is empty.
         executor.run();
         assert_eq!(*count.lock().unwrap(), 10);
     }
     #[test]
     fn test_parallel() {
-        let (executor, spawner) = new_executor_and_spawner();
+        let executor = Runtime::new();
         for _ in 0..10 {
-            spawner.spawn(TimerFuture::new(std::time::Duration::new(1, 0)));
+            executor.spawn(SleepFuture::new(std::time::Duration::new(1, 0))).expect("TODO: panic message");
         }
-        drop(spawner);
         let start = std::time::Instant::now();
         executor.run();
         // All 10 timers should complete in just over 1 second, give 10ms grace period for windows thread overhead
