@@ -22,7 +22,7 @@ impl SleepFuture {
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
         let h = thread::spawn(move || {
-            thread::sleep(duration);
+            thread::park_timeout(duration);
             let mut c = cloned_ctx.lock().unwrap();
             // Spawn the new thread
             if let Some(waker) = c.shared_waker.take() {
@@ -78,6 +78,7 @@ impl Drop for SleepFuture {
         if let SleepState::Running(handle, context) = &self.state {
             let mut ctx = context.lock().unwrap();
             ctx.shared_waker = None;
+            handle.thread().unpark(); // wake up the thread so it ends now
         }
     }
 }
@@ -86,10 +87,8 @@ impl Drop for SleepFuture {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-    use super::SleepFuture;
-    use std::time::{Duration, Instant};
+    use super::*;
+    use std::time::{Instant, Duration};
 
     #[test]
     fn test_timer_future() {
@@ -113,6 +112,16 @@ mod tests {
         let run_time = start.elapsed();
         assert!(run_time >= Duration::from_secs(2));
         assert!(run_time - Duration::from_secs(2) < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_timers_start() {
+        let start = Instant::now();
+        let timer = SleepFuture::new(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(100));
+        futures::executor::block_on(timer);
+        let run_time = start.elapsed();
+        assert!(run_time >= Duration::from_millis(300));
     }
 
 }

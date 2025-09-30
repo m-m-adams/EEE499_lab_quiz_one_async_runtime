@@ -1,11 +1,9 @@
-mod runtime;
-mod timer;
 
-use runtime::*;
+use eee499_timer::runtime::*;
+use eee499_timer::timer::*;
 use std::io;
 use std::io::Write;
 use std::time::Duration;
-use timer::*;
 
 async fn hello_there() {
     print!("hello");

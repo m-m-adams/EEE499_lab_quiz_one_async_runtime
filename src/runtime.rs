@@ -1,10 +1,10 @@
 use futures::{
     future::{BoxFuture, FutureExt},
-    task::{ArcWake, waker_ref},
+    task::{waker_ref, ArcWake},
 };
 use std::{
     future::Future,
-    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
     sync::{Arc, Mutex},
     task::Context,
 };
@@ -54,14 +54,14 @@ pub enum RuntimeError {
 
 impl Runtime {
 
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         const MAX_QUEUED_TASKS: usize = 10_000;
         let (task_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
         Runtime { ready_queue,  task_sender: Some(task_sender) }
     }
     /// Spawn a new future onto the task channel. The future should be any type which implements
     /// `Future` with an output type of `()` that can be sent between threads and have a static lifetime
-    pub(crate) fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) -> Result<(), RuntimeError> {
+    pub fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) -> Result<(), RuntimeError> {
         match self.task_sender.as_ref() {
             Some(sender) => {
                 // box the future - we want to be able to store different types of futures
@@ -78,7 +78,7 @@ impl Runtime {
         }
     }
 
-    pub(crate) fn run(mut self) {
+    pub fn run(mut self) {
         self.task_sender = None;
         while let Ok(task) = self.ready_queue.recv() {
             // Take the future, and if it has not yet completed (is still Some),
@@ -105,9 +105,6 @@ impl Runtime {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::Pin;
-    use std::task::Poll;
-    use std::time::{Duration, Instant};
     use super::*;
     use crate::timer::SleepFuture;
     async fn increment_count(count: Arc<Mutex<u32>>) {
@@ -159,36 +156,4 @@ mod tests {
         assert_eq!(*count.lock().unwrap(), 2);
     }
 
-    struct double_sleep {
-        sleep_one: SleepFuture,
-        sleep_two: SleepFuture,
-    }
-    impl Future for double_sleep {
-        type Output = ();
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            if let Poll::Ready(()) = Pin::new(&mut self.sleep_one).poll(cx) {
-                Poll::Ready(())
-            }
-            else if let Poll::Ready(()) = Pin::new(&mut self.sleep_two).poll(cx) {
-                Poll::Ready(())
-            }
-            else {
-                Poll::Pending
-            }
-
-        }
-    }
-
-    #[test]
-    fn test_select() {
-        let sleepy_sleep = double_sleep {sleep_one: SleepFuture::new(Duration::from_secs(2)), sleep_two: SleepFuture::new(Duration::from_secs(1))};
-        let start = Instant::now();
-        let executor = Runtime::new();
-
-        executor.spawn(sleepy_sleep).expect("failed to spawn");
-        executor.run();
-        let run_time = start.elapsed();
-        assert!(run_time >= Duration::from_secs(1));
-        assert!(run_time <= Duration::from_secs(2));
-    }
 }

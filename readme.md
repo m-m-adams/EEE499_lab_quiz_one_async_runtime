@@ -1,7 +1,7 @@
 # Async Lab Quiz
 
 This lab quiz will guide you through building core components of an async runtime in Rust. 
-You will implement a custom future (TimerFuture) and a simple executor to run asynchronous tasks. 
+You will implement a custom future (SleepFuture) and a simple executor to run asynchronous tasks. 
 The quiz is split into two parts, the first has you build a future for a timer and the second has you build a general purpose executer. 
 By completing this quiz, you will gain hands-on experience with Rust's concurrency primitives and async infrastructure. 
 All work should be completed in the provided files, and your solutions will be validated by unit tests.
@@ -9,37 +9,45 @@ When you are finished make sure you can run the sample main function.
 
 Do not modify the tests or import any more libraries
 
-## Part 1 - TimerFuture (timer.rs)
+## Part 1 - SleepFuture (timer.rs)
 
 ### Overview
 
-You are provided with a partial implementation of a custom future, `TimerFuture`, in `src/timer.rs`. Your task is to complete the `new` constructor and the `poll` method for `TimerFuture`.
+You are provided with a partial implementation of a custom future, `SleepFuture`, in `src/timer.rs`. 
+Your task is to complete `SleepFuture`
+`SleepFuture` uses a state machine with the following pattern:
+1. **`Created(Duration)`**: Initial state, holds the sleep duration
+2. **`Running(JoinHandle, Arc<Mutex<SleepContext>>)`**: Timer thread is active
+3. **`Done`**: Timer has completed
 
 ### Objectives
 
-- Implement the `TimerFuture::new(duration: Duration) -> Self` method.
-- Implement the `poll` method for the `Future` trait on `TimerFuture`.
+- Implement the `spawn_timer_thread` method.
+- Implement the `poll` method for the `Future` trait on `SleepFuture`.
 
 ### Details
 
-#### 1. `TimerFuture::new`
+#### 1. `spawn_timer_thread`
 
-- This method should create a new `TimerFuture` that completes after a specified duration.
-- You will need to set up shared state using `Arc<Mutex<SharedState>>`.
+- This method should create a thread that completes after a specified duration.
+- You will need to set up shared state using `Arc<Mutex<SleepContext>>`.
 - Spawn a thread that sleeps for the given duration, then updates the shared state and wakes the future.
 
-#### 2. `Future for TimerFuture: poll`
+#### 2. `Future for SleepFuture: poll`
 
-- The `poll` method should check if the timer has completed.
-- If completed, return ready
-- If not, store the current task's waker in the shared state and return pending.
+- If the state is `Created`, call `spawn_timer_thread` to start the timer thread and transition to the `Running` state.
+- If the state is `Running`, `poll` method should check if the timer has completed.
+  - If completed, transition to `Done` and return ready
+  - If not, store the current task's waker in the shared state and return pending.
+- If the state is `Done`, return ready.
 
 #### Hints
 
-- Use `std::thread::spawn` for the timer thread.
-- Use `std::sync::{Arc, Mutex}` for shared state.
+- Use `std::thread::spawn` for the timer thread. It returns a `JoinHandle`
+that can be checked for completion with `.is_complete()`
+- Use `Arc<Mutex<SleepContext>>` for shared state with the thread (e.g. give it the current waker).
 - The waker can be obtained from the context (`cx.waker().clone()`).
-- The shared state should be locked before accessing or modifying it.
+- The shared state must be locked before accessing or modifying it.
 
 ## Part 2 - Runtime (runtime.rs)
 
