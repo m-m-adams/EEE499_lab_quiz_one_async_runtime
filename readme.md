@@ -98,7 +98,9 @@ This is good for taking ownership of the future inside a task.
 
 # Testing
 
-Unit tests are provided in both modules. Run them with cargo test or the IDE
+Unit tests are provided in all three modules. There are additional implementation tests under `tests` that will only work if all three components are implemented successfully.
+
+Run tests with cargo test or the IDE
 
 Passing tests indicate correct implementation. 
 The tests in runtime.rs depend on timer.rs being implemented correctly as well!

@@ -11,6 +11,19 @@ use std::thread::JoinHandle;
 pub struct SleepFuture {
     state: SleepState,
 }
+enum SleepState{
+    /// the future is created but not yet polled
+    Created(Duration),
+    /// the future is currently waiting for the timer to complete
+    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
+    /// the future has completed
+    Done,
+}
+
+struct SleepContext {
+    shared_waker: Option<Waker>,
+}
+
 impl SleepFuture {
     /// Create a new `SleepFuture` which will complete after a timeout
     pub fn new(duration: Duration) -> Self {
@@ -33,18 +46,6 @@ impl SleepFuture {
     }
 }
 
-enum SleepState{
-    /// the future is created but not yet polled
-    Created(Duration),
-    /// the future is currently waiting for the timer to complete
-    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
-    /// the future has completed
-    Done,
-}
-
-struct SleepContext {
-    shared_waker: Option<Waker>,
-}
 
 impl Future for SleepFuture {
     type Output = ();
