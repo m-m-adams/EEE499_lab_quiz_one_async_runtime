@@ -35,7 +35,9 @@ pub fn select<A: SimpleFuture, B: SimpleFuture>(fut_one: A, fut_two: B) -> Selec
 mod tests {
     use super::*;
     use crate::timer::SleepFuture;
+    use ntest::timeout;
     #[test]
+    #[timeout(3000)]
     fn test_select() {
         let f1 = SleepFuture::new(std::time::Duration::new(1, 0));
         let f2 = SleepFuture::new(std::time::Duration::new(2, 0));

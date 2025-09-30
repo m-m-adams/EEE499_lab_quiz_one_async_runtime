@@ -116,6 +116,7 @@ impl Default for Runtime {
 
 #[cfg(test)]
 mod tests {
+    use ntest::timeout;
     use super::*;
     use crate::timer::SleepFuture;
     async fn increment_count(count: Arc<Mutex<u32>>) {
@@ -128,6 +129,7 @@ mod tests {
         increment_count(count).await;
     }
     #[test]
+    #[timeout(3000)]
     fn test_run_all_tasks() {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();
@@ -144,6 +146,7 @@ mod tests {
         assert_eq!(*count.lock().unwrap(), 10);
     }
     #[test]
+    #[timeout(3000)]
     fn test_parallel() {
         let executor = Runtime::new();
         for _ in 0..10 {
@@ -161,6 +164,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(3000)]
     fn test_series() {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();

@@ -4,9 +4,11 @@ use runtime::{Runtime, Task};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use ntest::timeout;
 use timer::SleepFuture;
 
 #[test]
+#[timeout(3000)]
 fn test_select() {
     let f1 = SleepFuture::new(std::time::Duration::new(1, 0));
     let f2 = SleepFuture::new(std::time::Duration::new(2, 0));

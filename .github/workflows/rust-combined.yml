@@ -13,9 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "build_checks"
@@ -30,9 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "build_checks"

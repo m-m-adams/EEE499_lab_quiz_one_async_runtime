@@ -87,8 +87,10 @@ impl Drop for SleepFuture {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    use ntest::timeout;
 
     #[test]
+    #[timeout(3000)]
     fn test_timer_future() {
         // this will pass as long as the duration in the future is correctly waited for
         let start = Instant::now();
@@ -100,6 +102,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(3000)]
     fn test_timers_parallel() {
         let start = Instant::now();
         let timers: Vec<_> = (0..10)
@@ -113,6 +116,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(3000)]
     fn test_timers_start() {
         let start = Instant::now();
         let timer = SleepFuture::new(Duration::from_millis(200));
