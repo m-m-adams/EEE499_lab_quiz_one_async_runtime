@@ -107,6 +107,6 @@ The tests in runtime.rs depend on timer.rs being implemented correctly as well!
 
 # Submission
 
-Ensure your code is well-commented and passes all tests before submitting.
-
+Ensure your code is well-commented and passes all tests before submitting. 
+It must also show no errors in `cargo fmt`, `cargo check`, and `cargo clippy`.
 Also run the main function to make sure it works. It should print `hello`, sleep 2 seconds, then print `there`

@@ -1,0 +1,79 @@
+name: Rust PR Checks
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Cargo Check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build_checks"
+      - run: cargo check --workspace --all-targets --all-features
+
+  test:
+    name: Cargo Test
+    runs-on: windows-latest
+    needs:
+      - check
+    continue-on-error: true # continue to fmt and lint checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build_checks"
+      - run: cargo test --all-targets --all-features --workspace
+      - run: cargo test --doc
+
+
+  fmt:
+    name: Cargo Fmt (Check Only)
+    runs-on: windows-latest
+    continue-on-error: true  # Does not block clippy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build_checks"
+      - run: rustup component add --toolchain nightly-x86_64-pc-windows-msvc rustfmt
+      - run: cargo fmt --all -- --check
+      - name: Annotate fmt issues
+        if: failure()
+        run: echo "::warning::Run 'cargo fmt' to fix formatting"
+
+  clippy:
+    name: Cargo Clippy
+    runs-on: windows-latest
+    continue-on-error: true  # in case more jobs are needed later
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: clippy
+          override: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build_checks"
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --workspace --all-features

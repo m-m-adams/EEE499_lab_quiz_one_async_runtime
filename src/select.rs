@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 // just for ease of implementation - otherwise must use unsafe code for the pins
-pub trait SimpleFuture: Future + Unpin{}
+pub trait SimpleFuture: Future + Unpin {}
 impl<T: Future + Unpin> SimpleFuture for T {}
 pub struct Select<A: SimpleFuture, B: SimpleFuture> {
     fut_one: A,
@@ -19,14 +19,11 @@ impl<A: SimpleFuture, B: SimpleFuture> Future for Select<A, B> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Poll::Ready(out) = Pin::new(&mut self.fut_one).poll(cx) {
             Poll::Ready(Either::A(out))
-        }
-        else if let Poll::Ready(out) = Pin::new(&mut self.fut_two).poll(cx) {
+        } else if let Poll::Ready(out) = Pin::new(&mut self.fut_two).poll(cx) {
             Poll::Ready(Either::B(out))
-        }
-        else {
+        } else {
             Poll::Pending
         }
-
     }
 }
 

@@ -1,10 +1,10 @@
 use futures::{
     future::{BoxFuture, FutureExt},
-    task::{waker_ref, ArcWake},
+    task::{ArcWake, waker_ref},
 };
 use std::{
     future::Future,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::mpsc::{Receiver, SyncSender, sync_channel},
     sync::{Arc, Mutex},
     task::Context,
 };
@@ -52,18 +52,21 @@ impl ArcWake for Task {
     }
 }
 
-
-
 impl Runtime {
-
     pub fn new() -> Self {
         const MAX_QUEUED_TASKS: usize = 10_000;
         let (task_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
-        Runtime { ready_queue,  task_sender: Some(task_sender) }
+        Runtime {
+            ready_queue,
+            task_sender: Some(task_sender),
+        }
     }
     /// Spawn a new future onto the task channel. The future should be any type which implements
     /// `Future` with an output type of `()` that can be sent between threads and have a static lifetime
-    pub fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) -> Result<(), RuntimeError> {
+    pub fn spawn(
+        &self,
+        future: impl Future<Output = ()> + 'static + Send,
+    ) -> Result<(), RuntimeError> {
         match self.task_sender.as_ref() {
             Some(sender) => {
                 // box the future - we want to be able to store different types of futures
@@ -76,7 +79,7 @@ impl Runtime {
                 sender.try_send(task)?;
                 Ok(())
             }
-            None => Err(RuntimeError::TaskChannelClosed)
+            None => Err(RuntimeError::TaskChannelClosed),
         }
     }
 
@@ -105,6 +108,12 @@ impl Runtime {
     }
 }
 
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new()
+    }   
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,7 +134,9 @@ mod tests {
         // Spawn tasks to wait and then increment the count
         for _ in 0..10 {
             let count_clone = count.clone();
-            executor.spawn(increment_count(count_clone)).expect("failed to spawn");
+            executor
+                .spawn(increment_count(count_clone))
+                .expect("failed to spawn");
         }
 
         executor.run();
@@ -136,7 +147,9 @@ mod tests {
     fn test_parallel() {
         let executor = Runtime::new();
         for _ in 0..10 {
-            executor.spawn(SleepFuture::new(std::time::Duration::new(1, 0))).expect("TODO: panic message");
+            executor
+                .spawn(SleepFuture::new(std::time::Duration::new(1, 0)))
+                .expect("TODO: panic message");
         }
         let start = std::time::Instant::now();
         executor.run();
@@ -151,11 +164,12 @@ mod tests {
     fn test_series() {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();
-        executor.spawn(increment_count_twice(count.clone())).expect("failed to spawn");
+        executor
+            .spawn(increment_count_twice(count.clone()))
+            .expect("failed to spawn");
 
         executor.run();
         // check that the count was incremented by 10 and the executor finished
         assert_eq!(*count.lock().unwrap(), 2);
     }
-
 }

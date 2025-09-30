@@ -1,3 +1,4 @@
+use std::thread::JoinHandle;
 use std::{
     future::Future,
     pin::Pin,
@@ -6,12 +7,11 @@ use std::{
     thread,
     time::Duration,
 };
-use std::thread::JoinHandle;
 
 pub struct SleepFuture {
     state: SleepState,
 }
-enum SleepState{
+enum SleepState {
     /// the future is created but not yet polled
     Created(Duration),
     /// the future is currently waiting for the timer to complete
@@ -27,11 +27,15 @@ struct SleepContext {
 impl SleepFuture {
     /// Create a new `SleepFuture` which will complete after a timeout
     pub fn new(duration: Duration) -> Self {
-        SleepFuture { state: SleepState::Created(duration) }
+        SleepFuture {
+            state: SleepState::Created(duration),
+        }
     }
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
-        let context = SleepContext { shared_waker: Some(cx.waker().clone()) };
+        let context = SleepContext {
+            shared_waker: Some(cx.waker().clone()),
+        };
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
         let h = thread::spawn(move || {
@@ -46,7 +50,6 @@ impl SleepFuture {
     }
 }
 
-
 impl Future for SleepFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -55,22 +58,18 @@ impl Future for SleepFuture {
                 self.spawn_timer_thread(cx, duration);
                 Poll::Pending
             }
-            SleepState::Running(ref handle,ref ctx) => {
+            SleepState::Running(ref handle, ref ctx) => {
                 if handle.is_finished() {
                     self.state = SleepState::Done;
                     Poll::Ready(())
-                }
-                else {
+                } else {
                     let mut ctx = ctx.lock().unwrap();
-                        ctx.shared_waker = Some(cx.waker().clone());
-                        Poll::Pending
+                    ctx.shared_waker = Some(cx.waker().clone());
+                    Poll::Pending
                 }
             }
-            SleepState::Done => {
-                Poll::Ready(())
-            }
+            SleepState::Done => Poll::Ready(()),
         }
-
     }
 }
 
@@ -84,12 +83,10 @@ impl Drop for SleepFuture {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Instant, Duration};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_timer_future() {
@@ -124,5 +121,4 @@ mod tests {
         let run_time = start.elapsed();
         assert!(run_time >= Duration::from_millis(300));
     }
-
 }
