@@ -16,6 +16,21 @@ impl SleepFuture {
     pub fn new(duration: Duration) -> Self {
         SleepFuture { state: SleepState::Created(duration) }
     }
+
+    fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+        let context = SleepContext { shared_waker: Some(cx.waker().clone()) };
+        let context = Arc::new(Mutex::new(context));
+        let cloned_ctx = context.clone();
+        let h = thread::spawn(move || {
+            thread::sleep(duration);
+            let mut c = cloned_ctx.lock().unwrap();
+            // Spawn the new thread
+            if let Some(waker) = c.shared_waker.take() {
+                waker.wake();
+            }
+        });
+        self.state = SleepState::Running(h, context);
+    }
 }
 
 enum SleepState{
@@ -34,24 +49,12 @@ struct SleepContext {
 impl Future for SleepFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &self.state {
+        match self.state {
             SleepState::Created(duration) => {
-                let context = SleepContext {shared_waker:Some(cx.waker().clone())};
-                let context = Arc::new(Mutex::new(context));
-                let cloned_ctx = context.clone();
-                let d = *duration;
-                let h = thread::spawn(move || {
-                    thread::sleep(d);
-                    let mut c = cloned_ctx.lock().unwrap();
-                    // Spawn the new thread
-                    if let Some(waker) = c.shared_waker.take() {
-                        waker.wake();
-                    }
-                });
-                self.state = SleepState::Running(h, context);
+                self.spawn_timer_thread(cx, duration);
                 Poll::Pending
             }
-            SleepState::Running(handle,ctx) => {
+            SleepState::Running(ref handle,ref ctx) => {
                 if handle.is_finished() {
                     self.state = SleepState::Done;
                     Poll::Ready(())
