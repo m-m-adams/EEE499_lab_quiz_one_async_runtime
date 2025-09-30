@@ -41,6 +41,10 @@ Your task is to complete `SleepFuture`
   - If not, store the current task's waker in the shared state and return pending.
 - If the state is `Done`, return ready.
 
+#### 3. `SleepFuture: drop`
+- The timer thread should be woken up and completed when the future is dropped to ensure it doesn't hold onto the waker channel
+- Remove the  waker from the shared state and wake the thread.
+
 #### Hints
 
 - Use `std::thread::spawn` for the timer thread. It returns a `JoinHandle`
@@ -48,6 +52,8 @@ that can be checked for completion with `.is_complete()`
 - Use `Arc<Mutex<SleepContext>>` for shared state with the thread (e.g. give it the current waker).
 - The waker can be obtained from the context (`cx.waker().clone()`).
 - The shared state must be locked before accessing or modifying it.
+- `std::thread::park_timeout` will pause the current thread until the specified time or its unparked. 
+This allows you to manually unpark it through its handle to wake the thread on drop
 
 ## Part 2 - Runtime (runtime.rs)
 
@@ -95,6 +101,27 @@ This is good for taking ownership of the future inside a task.
     } 
    
    ```
+## Part 3 - Select (select.rs)
+
+### Overview
+You are provided with a partial implementation of a select combinator in src/select.rs. Your task is to complete the poll method for the Future trait on the Select struct. This combinator should poll two futures and return the output of the first one that completes, wrapped in the Either enum.
+
+### Objectives
+Implement the poll method for Select<A, B>.
+Correctly poll both futures and return as soon as one is ready.
+Wrap the result in Either::A or Either::B depending on which future completes first.
+#### 1. Complete `fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>`
+   - Poll both `fut_one` and `fut_two` using Pin::new.
+   - If fut_one is ready, return `Poll::Ready(Either::A(output))`.
+   - If fut_two is ready, return `Poll::Ready(Either::B(output))`.
+   - If neither is ready, return `Poll::Pending`.
+
+### Hints
+   - Use `Pin::new(&mut self.fut_one)` and `Pin::new(&mut self.fut_two)` to create a pollable future.
+   - The order in which you poll the futures can affect which one wins if both are ready at the same time.
+   - You do not need to use unsafe code; the SimpleFuture trait ensures the futures are Unpin.
+   - Make sure to poll both futures every time poll is called, we don't track which one is ready
+   - If your future from part 1 doesn't implement drop correctly the select tests will fail
 
 # Testing
 
