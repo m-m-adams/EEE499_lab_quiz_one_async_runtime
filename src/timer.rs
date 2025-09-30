@@ -6,22 +6,29 @@ use std::{
     thread,
     time::Duration,
 };
+use std::thread::JoinHandle;
 
 pub struct SleepFuture {
     state: SleepState,
 }
+impl SleepFuture {
+    /// Create a new `SleepFuture` which will complete after a timeout
+    pub fn new(duration: Duration) -> Self {
+        SleepFuture { state: SleepState::Created(duration) }
+    }
+}
+
 enum SleepState{
     /// the future is created but not yet polled
     Created(Duration),
     /// the future is currently waiting for the timer to complete
-    Running(SleepContext),
+    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
     /// the future has completed
     Done,
 }
 
 struct SleepContext {
-    shared_waker: Arc<Mutex<Option<Waker>>>,
-    waiting_thread: thread::JoinHandle<()>,
+    shared_waker: Option<Waker>,
 }
 
 impl Future for SleepFuture {
@@ -29,18 +36,31 @@ impl Future for SleepFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &self.state {
             SleepState::Created(duration) => {
-                self.state = SleepState::Running(self.spawn_wait_thread(*duration, cx));
+                let context = SleepContext {shared_waker:Some(cx.waker().clone())};
+                let context = Arc::new(Mutex::new(context));
+                let cloned_ctx = context.clone();
+                let d = *duration;
+                let h = thread::spawn(move || {
+                    thread::sleep(d);
+                    let mut c = cloned_ctx.lock().unwrap();
+                    // Spawn the new thread
+                    if let Some(waker) = c.shared_waker.take() {
+                        waker.wake();
+                    }
+                });
+                self.state = SleepState::Running(h, context);
                 Poll::Pending
             }
-            SleepState::Running(ctx) => {
-                if ctx.waiting_thread.is_finished() {
+            SleepState::Running(handle,ctx) => {
+                if handle.is_finished() {
                     self.state = SleepState::Done;
-                    return Poll::Ready(());
+                    Poll::Ready(())
                 }
-
-                let mut waker = ctx.shared_waker.lock().unwrap();
-                *waker = Some(cx.waker().clone());
-                Poll::Pending
+                else {
+                    let mut ctx = ctx.lock().unwrap();
+                        ctx.shared_waker = Some(cx.waker().clone());
+                        Poll::Pending
+                }
             }
             SleepState::Done => {
                 Poll::Ready(())
@@ -50,26 +70,7 @@ impl Future for SleepFuture {
     }
 }
 
-impl SleepFuture {
-    /// Create a new `TimerFuture` which will complete after the provided
-    /// timeout.
-    pub fn new(duration: Duration) -> Self {
-        SleepFuture { state: SleepState::Created(duration) }
-    }
-    fn spawn_wait_thread(&self, duration: Duration, cx: &mut Context<'_>) ->  SleepContext {
-        let waker = cx.waker().clone();
-        let shared_waker = Arc::new(Mutex::new(Some(waker)));
-        let cloned_waker = shared_waker.clone();
-        let join_handle = thread::spawn(move || {
-            thread::sleep(duration);
-            // Spawn the new thread
-           if let Some(waker) = cloned_waker.lock().unwrap().take() {
-                waker.wake();
-           }
-        });
-        SleepContext { shared_waker, waiting_thread: join_handle }
-    }
-}
+
 
 #[cfg(test)]
 mod tests {
