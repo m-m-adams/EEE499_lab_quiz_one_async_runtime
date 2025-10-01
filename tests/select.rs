@@ -1,9 +1,6 @@
 use eee499_timer::{runtime, select, timer};
-use futures::future::Future;
 use ntest::timeout;
-use runtime::{Runtime, Task};
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use runtime::{Runtime};
 use std::time::{Duration, Instant};
 use timer::SleepFuture;
 
