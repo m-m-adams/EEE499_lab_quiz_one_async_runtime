@@ -111,14 +111,14 @@ impl Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self::new()
-    }   
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use ntest::timeout;
     use super::*;
     use crate::timer::SleepFuture;
+    use ntest::timeout;
     async fn increment_count(count: Arc<Mutex<u32>>) {
         SleepFuture::new(std::time::Duration::new(0, 100)).await;
         let mut num = count.lock().unwrap();

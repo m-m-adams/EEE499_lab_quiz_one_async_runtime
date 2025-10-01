@@ -2,6 +2,7 @@ name: Rust PR Checks
 
 on:
   pull_request:
+  push:
 
 env:
   CARGO_TERM_COLOR: always

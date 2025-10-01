@@ -86,8 +86,8 @@ impl Drop for SleepFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
     use ntest::timeout;
+    use std::time::{Duration, Instant};
 
     #[test]
     #[timeout(3000)]
