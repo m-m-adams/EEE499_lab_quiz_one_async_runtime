@@ -34,7 +34,8 @@ impl SleepFuture {
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
         let context = SleepContext {
-            shared_waker: Some(cx.waker().clone()), completed: false,
+            shared_waker: Some(cx.waker().clone()),
+            completed: false,
         };
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
@@ -59,7 +60,7 @@ impl Future for SleepFuture {
                 self.spawn_timer_thread(cx, duration);
                 Poll::Pending
             }
-            SleepState::Running( ref ctx) => {
+            SleepState::Running(ref ctx) => {
                 {
                     let mut ctx = ctx.lock().unwrap();
                     if !ctx.completed {

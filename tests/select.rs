@@ -1,6 +1,6 @@
 use eee499_timer::{runtime, select, timer};
 use ntest::timeout;
-use runtime::{Runtime};
+use runtime::Runtime;
 use std::time::{Duration, Instant};
 use timer::SleepFuture;
 
