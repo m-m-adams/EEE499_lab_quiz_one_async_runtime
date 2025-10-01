@@ -52,7 +52,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "build_checks"
-      - run: rustup component add --toolchain nightly-x86_64-pc-windows-msvc rustfmt
+      - run: rustup component add --toolchain stable-x86_64-pc-windows-msvc rustfmt
       - run: cargo fmt --all -- --check
       - name: Annotate fmt issues
         if: failure()
