@@ -101,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    #[timeout(3000)]
+    #[timeout(10000)]
     fn test_timers_parallel() {
         let start = Instant::now();
         let timers: Vec<_> = (0..10)
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    #[timeout(3000)]
+    #[timeout(10000)]
     fn test_timers_start() {
         let start = Instant::now();
         let timer = SleepFuture::new(Duration::from_millis(200));

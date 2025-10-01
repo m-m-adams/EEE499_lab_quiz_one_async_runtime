@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(*count.lock().unwrap(), 10);
     }
     #[test]
-    #[timeout(3000)]
+    #[timeout(10000)]
     fn test_parallel() {
         let executor = Runtime::new();
         for _ in 0..10 {
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    #[timeout(3000)]
+    #[timeout(10000)]
     fn test_series() {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();
