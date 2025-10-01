@@ -1,4 +1,3 @@
-use std::thread::JoinHandle;
 use std::{
     future::Future,
     pin::Pin,
@@ -15,13 +14,14 @@ enum SleepState {
     /// the future is created but not yet polled
     Created(Duration),
     /// the future is currently waiting for the timer to complete
-    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
+    Running(Arc<Mutex<SleepContext>>),
     /// the future has completed
     Done,
 }
 
 struct SleepContext {
     shared_waker: Option<Waker>,
+    completed: bool,
 }
 
 impl SleepFuture {
@@ -34,19 +34,20 @@ impl SleepFuture {
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
         let context = SleepContext {
-            shared_waker: Some(cx.waker().clone()),
+            shared_waker: Some(cx.waker().clone()), completed: false,
         };
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
-        let h = thread::spawn(move || {
+        let _ = thread::spawn(move || {
             thread::sleep(duration);
             let mut c = cloned_ctx.lock().unwrap();
-            // Spawn the new thread
+            c.completed = true;
+            // wake the task
             if let Some(waker) = c.shared_waker.take() {
                 waker.wake();
             }
         });
-        self.state = SleepState::Running(h, context);
+        self.state = SleepState::Running(context);
     }
 }
 
@@ -58,15 +59,16 @@ impl Future for SleepFuture {
                 self.spawn_timer_thread(cx, duration);
                 Poll::Pending
             }
-            SleepState::Running(ref handle, ref ctx) => {
-                if handle.is_finished() {
-                    self.state = SleepState::Done;
-                    Poll::Ready(())
-                } else {
+            SleepState::Running( ref ctx) => {
+                {
                     let mut ctx = ctx.lock().unwrap();
-                    ctx.shared_waker = Some(cx.waker().clone());
-                    Poll::Pending
+                    if !ctx.completed {
+                        ctx.shared_waker = Some(cx.waker().clone());
+                        return Poll::Pending;
+                    }
                 }
+                self.state = SleepState::Done;
+                Poll::Ready(())
             }
             SleepState::Done => Poll::Ready(()),
         }
@@ -75,9 +77,10 @@ impl Future for SleepFuture {
 
 impl Drop for SleepFuture {
     fn drop(&mut self) {
-        if let SleepState::Running(_handle, context) = &self.state {
+        if let SleepState::Running(context) = &self.state {
             let mut ctx = context.lock().unwrap();
             ctx.shared_waker = None;
+            ctx.completed = true;
         }
     }
 }

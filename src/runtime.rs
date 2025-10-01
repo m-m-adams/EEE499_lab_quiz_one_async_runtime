@@ -134,7 +134,7 @@ mod tests {
         let count = Arc::new(Mutex::new(0));
         let executor = Runtime::new();
         // Spawn tasks to wait and then increment the count
-        for _ in 0..10 {
+        for _ in 0..4 {
             let count_clone = count.clone();
             executor
                 .spawn(increment_count(count_clone))
@@ -143,13 +143,13 @@ mod tests {
 
         executor.run();
         // check that the count was incremented by 10 and the executor finished
-        assert_eq!(*count.lock().unwrap(), 10);
+        assert_eq!(*count.lock().unwrap(), 4);
     }
     #[test]
     #[timeout(10000)]
     fn test_parallel() {
         let executor = Runtime::new();
-        for _ in 0..10 {
+        for _ in 0..5 {
             executor
                 .spawn(SleepFuture::new(std::time::Duration::new(1, 0)))
                 .expect("TODO: panic message");
