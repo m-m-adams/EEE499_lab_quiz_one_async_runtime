@@ -39,7 +39,7 @@ impl SleepFuture {
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
         let h = thread::spawn(move || {
-            thread::park_timeout(duration);
+            thread::sleep(duration);
             let mut c = cloned_ctx.lock().unwrap();
             // Spawn the new thread
             if let Some(waker) = c.shared_waker.take() {
@@ -75,10 +75,9 @@ impl Future for SleepFuture {
 
 impl Drop for SleepFuture {
     fn drop(&mut self) {
-        if let SleepState::Running(handle, context) = &self.state {
+        if let SleepState::Running(_handle, context) = &self.state {
             let mut ctx = context.lock().unwrap();
             ctx.shared_waker = None;
-            handle.thread().unpark(); // wake up the thread so it ends now
         }
     }
 }

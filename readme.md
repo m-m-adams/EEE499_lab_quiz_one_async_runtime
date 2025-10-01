@@ -42,8 +42,7 @@ Your task is to complete `SleepFuture`
 - If the state is `Done`, return ready.
 
 #### 3. `SleepFuture: drop`
-- The timer thread should be woken up and completed when the future is dropped to ensure it doesn't hold onto the waker channel
-- Remove the  waker from the shared state and wake the thread.
+- The timer thread needs its waker removed to close its channel and drop the arc to the executor.
 
 #### Hints
 
