@@ -49,13 +49,12 @@ struct SleepContext {
 impl SleepContext {
     // returns true if not done yet
     fn wake_if_needed(&mut self) -> bool {
-        if self.end_time < Instant::now() {
-            if let Some(waker) = self.shared_waker.take() {
+        if self.end_time < Instant::now()
+            && let Some(waker) = self.shared_waker.take() {
                 self.completed = true;
                 waker.wake();
                 return false;
             }
-        }
     true
     }
 }
