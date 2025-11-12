@@ -5,8 +5,174 @@ use std::{
     sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
+use std::cmp::Reverse;
+use std::hash::Hash;
+use std::sync::LazyLock;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use priority_queue::PriorityQueue;
+use rand::random;
+
+#[derive(Debug)]
+struct SleepContext {
+    shared_waker: Option<Waker>,
+    done: bool
+}
+
+#[derive(Debug)]
+struct SleepMessage {
+    waker: Arc<Mutex<SleepContext>>,
+    duration: Duration,
+}
+
+#[derive(Debug)]
+struct SleepItem {
+    waker: Arc<Mutex<SleepContext>>,
+    wake_time: Instant,
+    rand_id: u64,
+}
+
+impl Hash for SleepItem {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.wake_time.hash(state);
+        self.rand_id.hash(state);
+    }
+}
+
+impl PartialEq<Self> for SleepItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.wake_time == other.wake_time && self.rand_id == other.rand_id
+    }
+}
+
+impl Eq for SleepItem {}
+
+
+impl SleepItem {
+    fn new(msg: SleepMessage) -> Self {
+        SleepItem {
+            waker: msg.waker,
+            wake_time: Instant::now() + msg.duration,
+            rand_id: random::<u64>()
+        }
+    }
+    fn time_left(&self) -> Duration {
+        self.wake_time.duration_since(Instant::now())
+    }
+
+    fn is_expired(&self) -> bool {
+        self.time_left() <= Duration::from_millis(0)
+    }
+
+    fn wake(self) {
+        // time to wake up the associated future
+        let mut context = self.waker.lock().unwrap();
+        let mut shared_waker = context.shared_waker.take();
+        if let Some(waker) = shared_waker.take() {
+            dbg!("calling wake");
+
+            waker.wake();
+            context.done = true;
+        }
+    }
+}
+
+static SLEEP_ITEM: Mutex<Option<SleepItem>> = Mutex::new(None);
+
+fn set_item_and_wake(item: SleepItem, handle: &JoinHandle<()>) {
+    dbg!("setting item", &item);
+    *SLEEP_ITEM.lock().unwrap() = Some(item);
+    handle.thread().unpark();
+}
+fn sleep_until_wake_inner() -> ! {
+    loop {
+        let time: Option<Duration> = {
+            let mut g = SLEEP_ITEM.lock().unwrap();
+            match g.take() {
+                None => None,
+                Some(item) => {
+                    dbg!("checking item", &item);
+                    if item.is_expired() {
+                        item.wake();
+                        None
+                    } else {
+                        // not woken up yet, put it back and park until it's time
+                        let sleep_time = item.time_left();
+                        dbg!("sleeping for {:?} at {:?}", sleep_time, Instant::now());
+                        *g = Some(item);
+                        Some(sleep_time)
+                    }
+                }
+            }
+        };
+        if let Some(time) = time {
+            dbg!("parking for {time:?}");
+            {
+                let mut g = SLEEP_ITEM.lock().unwrap();
+                let item = g.as_ref().unwrap();
+                dbg!("checking item", &g);
+
+            }
+            thread::park_timeout(time);
+        } else {
+            dbg!("parking indefinitely");
+
+            thread::park();
+        }
+
+    }
+}
+
+fn sleep_until_wake() -> JoinHandle<()> {
+    thread::spawn(move || {
+        sleep_until_wake_inner();
+    })
+}
+
+fn sleep_message_reciever(rx: Receiver<SleepMessage>, handle: JoinHandle<()>) {
+    let mut sleep_queue: PriorityQueue<SleepItem, Reverse<Instant>>= PriorityQueue::new();
+    dbg!("waiting for items",);
+
+    for msg in rx {
+        dbg!(&msg);
+
+        let item = SleepItem::new(msg);
+        let time =item.wake_time;
+        sleep_queue.push(item, Reverse(time));
+        if let Some(current)= SLEEP_ITEM.lock().unwrap().take() {
+            if let Some(highest) = {sleep_queue.pop()} {
+                if highest.0.wake_time < Instant::now() {
+                    dbg!("wake time in the past");
+                    highest.0.wake();
+                }
+                else if highest.0.wake_time < current.wake_time {
+                    let item = sleep_queue.pop().unwrap().0;
+                    set_item_and_wake(item, &handle);
+                    let p = Reverse(current.wake_time);
+                    sleep_queue.push(current, p);
+                } else {
+                    sleep_queue.push(highest.0, highest.1);
+                }
+            }
+        } else {
+            dbg!("no current item");
+            set_item_and_wake(sleep_queue.pop().unwrap().0, &handle);
+        }
+    }
+}
+
+static SLEEP_QUEUE: LazyLock<Sender<SleepMessage>> = LazyLock::new (|| {
+    dbg!("init sleep queue",);
+
+    let (tx, rx) = channel::<SleepMessage>();
+    let h = sleep_until_wake();
+    std::thread::spawn(move ||  {
+        sleep_message_reciever(rx, h);
+    });
+    tx
+});
+
 
 pub struct SleepFuture {
     state: SleepState,
@@ -15,14 +181,12 @@ enum SleepState {
     /// the future is created but not yet polled
     Created(Duration),
     /// the future is currently waiting for the timer to complete
-    Running(JoinHandle<()>, Arc<Mutex<SleepContext>>),
+    Running(Arc<Mutex<SleepContext>>),
     /// the future has completed
     Done,
 }
 
-struct SleepContext {
-    shared_waker: Option<Waker>,
-}
+
 
 impl SleepFuture {
     /// Create a new `SleepFuture` which will complete after a timeout
@@ -33,20 +197,16 @@ impl SleepFuture {
     }
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+        dbg!("Spawning timer thread for {:?}", duration);
         let context = SleepContext {
             shared_waker: Some(cx.waker().clone()),
+            done: false
         };
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
-        let h = thread::spawn(move || {
-            thread::sleep(duration);
-            let mut c = cloned_ctx.lock().unwrap();
-            // Spawn the new thread
-            if let Some(waker) = c.shared_waker.take() {
-                waker.wake();
-            }
-        });
-        self.state = SleepState::Running(h, context);
+        let msg = SleepMessage { waker: cloned_ctx, duration };
+        SLEEP_QUEUE.send(msg).unwrap();
+        self.state = SleepState::Running(context);
     }
 }
 
@@ -58,8 +218,8 @@ impl Future for SleepFuture {
                 self.spawn_timer_thread(cx, duration);
                 Poll::Pending
             }
-            SleepState::Running(ref handle, ref ctx) => {
-                if handle.is_finished() {
+            SleepState::Running(ref ctx) => {
+                if ctx.lock().unwrap().done {
                     self.state = SleepState::Done;
                     Poll::Ready(())
                 } else {
@@ -75,7 +235,7 @@ impl Future for SleepFuture {
 
 impl Drop for SleepFuture {
     fn drop(&mut self) {
-        if let SleepState::Running(_handle, context) = &self.state {
+        if let SleepState::Running(context) = &self.state {
             let mut ctx = context.lock().unwrap();
             ctx.shared_waker = None;
         }
