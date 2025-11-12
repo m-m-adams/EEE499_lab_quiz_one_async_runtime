@@ -8,7 +8,6 @@ use std::{
 };
 use std::sync::LazyLock;
 use std::thread::JoinHandle;
-use futures::future::Lazy;
 
 static SLEEP_QUEUE: Mutex<Vec<Arc<Mutex<SleepContext>>>> = Mutex::new(
     Vec::new()
@@ -18,7 +17,6 @@ static SLEEP_THREAD: LazyLock<JoinHandle<()>> = LazyLock::new(
     {move || thread::spawn(|| loop {
         dbg!("awake from sleep");
         let mut queue = SLEEP_QUEUE.lock().unwrap();
-        let first = queue.first();
         queue.retain(|ctx| ctx.lock().unwrap().wake_if_needed());
         let duration = queue.iter().fold(Duration::new(1,0), |acc, ctx| { ctx.lock().unwrap().end_time.duration_since(Instant::now()).min(acc)});
         drop(queue);
