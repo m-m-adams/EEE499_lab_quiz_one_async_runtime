@@ -4,8 +4,31 @@ use std::{
     sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
+use std::sync::LazyLock;
+use std::thread::JoinHandle;
+use futures::future::Lazy;
+
+static SLEEP_QUEUE: Mutex<Vec<Arc<Mutex<SleepContext>>>> = Mutex::new(
+    Vec::new()
+);
+
+static SLEEP_THREAD: LazyLock<JoinHandle<()>> = LazyLock::new(
+    {move || thread::spawn(|| loop {
+        dbg!("awake from sleep");
+        let mut queue = SLEEP_QUEUE.lock().unwrap();
+        let first = queue.first();
+        queue.retain(|ctx| ctx.lock().unwrap().wake_if_needed());
+        let duration = queue.iter().fold(Duration::new(1,0), |acc, ctx| { ctx.lock().unwrap().end_time.duration_since(Instant::now()).min(acc)});
+        drop(queue);
+        dbg!("parking");
+
+        thread::park_timeout(duration);
+
+
+    })}
+);
 
 pub struct SleepFuture {
     state: SleepState,
@@ -22,6 +45,21 @@ enum SleepState {
 struct SleepContext {
     shared_waker: Option<Waker>,
     completed: bool,
+    end_time: Instant,
+}
+
+impl SleepContext {
+    // returns true if not done yet
+    fn wake_if_needed(&mut self) -> bool {
+        if self.end_time < Instant::now() {
+            if let Some(waker) = self.shared_waker.take() {
+                self.completed = true;
+                waker.wake();
+                return false;
+            }
+        }
+    true
+    }
 }
 
 impl SleepFuture {
@@ -36,18 +74,12 @@ impl SleepFuture {
         let context = SleepContext {
             shared_waker: Some(cx.waker().clone()),
             completed: false,
+            end_time: Instant::now() + duration,
         };
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
-        let _ = thread::spawn(move || {
-            thread::sleep(duration);
-            let mut c = cloned_ctx.lock().unwrap();
-            c.completed = true;
-            // wake the task
-            if let Some(waker) = c.shared_waker.take() {
-                waker.wake();
-            }
-        });
+        SLEEP_QUEUE.lock().unwrap().push(cloned_ctx);
+        SLEEP_THREAD.thread().unpark();
         self.state = SleepState::Running(context);
     }
 }
