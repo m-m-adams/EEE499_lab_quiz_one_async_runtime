@@ -1,28 +1,38 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
-    thread,
-    time::{Duration, Instant},
-};
-use std::sync::LazyLock;
+use std::{future::Future, hint, pin::Pin, sync::{Arc, Mutex}, task::{Context, Poll, Waker}, thread, time::{Duration, Instant}};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::{LazyLock, MutexGuard};
 use std::thread::JoinHandle;
 
+// this is a mutex around a vector of sleep contexts. The outer mutex synchronizes access to the vector,
+// the inner mutexes are used to synchronize access to each individual context
 static SLEEP_QUEUE: Mutex<Vec<Arc<Mutex<SleepContext>>>> = Mutex::new(
     Vec::new()
 );
 
+// use this atomic signal to tell the sleep thread that there is a new item in the queue
+static SIGNAL: AtomicBool = AtomicBool::new(false);
+
 static SLEEP_THREAD: LazyLock<JoinHandle<()>> = LazyLock::new(
     {move || thread::spawn(|| loop {
-        dbg!("awake from sleep");
-        let mut queue = SLEEP_QUEUE.lock().unwrap();
-        queue.retain(|ctx| ctx.lock().unwrap().wake_if_needed());
-        let duration = queue.iter().fold(Duration::new(1,0), |acc, ctx| { ctx.lock().unwrap().end_time.duration_since(Instant::now()).min(acc)});
-        drop(queue);
-        dbg!("parking");
+        // todo Lock the sleep queue
+        let mut queue: MutexGuard<Vec<Arc<Mutex<SleepContext>>>> = todo!();
 
-        thread::park_timeout(duration);
+        // todo iterate throug the queue, wake any threads that are expired using the .wake_if_needed() method
+
+        // Find the next expiring timer to figure out when to sleep until. Use 1 second as the max sleep
+        let default = Instant::now() + Duration::new(1,0);
+
+        //todo iterate through the queue to find the minimum end_time
+        let min: Instant = todo!();
+
+        drop(queue);
+
+        //todo write a compare and swap atomic operation to set the signal to false iff it is true
+
+        while todo!("Compare and swap to check if the signal is true") && Instant::now() < min {
+            hint::spin_loop();
+        }
 
 
     })}
@@ -68,6 +78,9 @@ impl SleepFuture {
     }
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+        if SLEEP_THREAD.is_finished() {
+            panic!("oh no")
+        }
         let context = SleepContext {
             shared_waker: Some(cx.waker().clone()),
             completed: false,
@@ -76,7 +89,7 @@ impl SleepFuture {
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
         SLEEP_QUEUE.lock().unwrap().push(cloned_ctx);
-        SLEEP_THREAD.thread().unpark();
+        todo!("Set the signal to true using an atomic store operation");
         self.state = SleepState::Running(context);
     }
 }
