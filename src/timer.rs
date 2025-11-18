@@ -1,28 +1,30 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
-    thread,
-    time::{Duration, Instant},
-};
+use std::{future::Future, hint, pin::Pin, sync::{Arc, Mutex}, task::{Context, Poll, Waker}, thread, time::{Duration, Instant}};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use std::thread::JoinHandle;
 
+// this is a mutex around a vector of sleep contexts. The outer mutex synchronizes access to the vector,
+// the inner mutexes are used to synchronize access to each individual context
 static SLEEP_QUEUE: Mutex<Vec<Arc<Mutex<SleepContext>>>> = Mutex::new(
     Vec::new()
 );
 
+// use this atomic signal to tell the sleep thread that there is a new item in the queue
+static SIGNAL: AtomicBool = AtomicBool::new(false);
+
 static SLEEP_THREAD: LazyLock<JoinHandle<()>> = LazyLock::new(
     {move || thread::spawn(|| loop {
-        dbg!("awake from sleep");
+
         let mut queue = SLEEP_QUEUE.lock().unwrap();
         queue.retain(|ctx| ctx.lock().unwrap().wake_if_needed());
-        let duration = queue.iter().fold(Duration::new(1,0), |acc, ctx| { ctx.lock().unwrap().end_time.duration_since(Instant::now()).min(acc)});
+        let end = Instant::now() + Duration::new(1,0);
+        let duration = queue.iter().fold(end, |acc, ctx| { ctx.lock().unwrap().end_time.min(acc)});
         drop(queue);
-        dbg!("parking");
 
-        thread::park_timeout(duration);
+        while SIGNAL.compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed) == Ok(false) && Instant::now() < duration {
+            hint::spin_loop();
+        }
 
 
     })}
@@ -68,6 +70,9 @@ impl SleepFuture {
     }
 
     fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+        if SLEEP_THREAD.is_finished() {
+            panic!("oh no")
+        }
         let context = SleepContext {
             shared_waker: Some(cx.waker().clone()),
             completed: false,
@@ -76,7 +81,7 @@ impl SleepFuture {
         let context = Arc::new(Mutex::new(context));
         let cloned_ctx = context.clone();
         SLEEP_QUEUE.lock().unwrap().push(cloned_ctx);
-        SLEEP_THREAD.thread().unpark();
+        SIGNAL.store(true, Ordering::Relaxed);
         self.state = SleepState::Running(context);
     }
 }
