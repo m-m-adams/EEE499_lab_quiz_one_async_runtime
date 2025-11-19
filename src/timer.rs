@@ -77,8 +77,9 @@ impl SleepFuture {
         }
     }
 
-    fn spawn_timer_thread(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
+    fn setup_delayed_wake(mut self: Pin<&mut Self>, cx: &mut Context, duration: Duration) {
         if SLEEP_THREAD.is_finished() {
+            // should never happen, we just need to access it once to make sure it's started
             panic!("oh no")
         }
         let context = SleepContext {
@@ -99,7 +100,7 @@ impl Future for SleepFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
             SleepState::Created(duration) => {
-                self.spawn_timer_thread(cx, duration);
+                self.setup_delayed_wake(cx, duration);
                 Poll::Pending
             }
             SleepState::Running(ref ctx) => {
